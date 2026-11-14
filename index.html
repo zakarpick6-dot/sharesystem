@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revomaker System Share</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<video id="bg" src="bg.mp4" autoplay muted loop playsinline></video>
+<div class="shade"></div>
+<div class="wrap">
+  <h1>Revomaker System Share</h1>
+  <p class="sub">Text files shared with you.</p>
+  <div id="app"></div>
+  <div class="foot"><a href="dashboard.html">Owner login</a></div>
+</div>
+<script>
+const app = document.getElementById('app');
+function el(t, c, x) { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; }
+async function api(d, id) { const r = await fetch('/api?do=' + d + (id ? '&id=' + id : '')); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Error'); return j; }
+async function copy(t, b, label) { try { await navigator.clipboard.writeText(t); b.textContent = 'Copied!'; } catch (e) { b.textContent = 'Failed'; } setTimeout(() => { b.textContent = label; }, 1500); }
+
+let list = [];
+async function show() {
+  app.innerHTML = '';
+  if (!list.length) { app.appendChild(el('div', 'empty', 'Nothing here yet.')); return; }
+  const id = list.some(f => f.id === location.hash.slice(1)) ? location.hash.slice(1) : list[0].id;
+  const chips = el('div', 'chips');
+  list.forEach(f => { const b = el('button', 'chip' + (f.id === id ? ' on' : ''), f.name); b.onclick = () => { location.hash = f.id; }; chips.appendChild(b); });
+  app.appendChild(chips);
+  const box = el('div', 'box'); app.appendChild(box);
+  let f;
+  try { f = await api('get', id); } catch (e) { box.appendChild(el('div', 'empty', 'This file is not available.')); return; }
+  const bar = el('div', 'bar'), left = el('div');
+  left.append(el('h2', null, f.name), el('small', null, f.size.toLocaleString() + ' characters · updated ' + f.updated));
+  const btns = el('div', 'btns'), cl = el('button', 'btn main', 'Copy link'), ct = el('button', 'btn', 'Copy text');
+  cl.onclick = () => copy(location.origin + '/#' + f.id, cl, 'Copy link');
+  ct.onclick = () => copy(f.text, ct, 'Copy text');
+  btns.append(cl, ct); bar.append(left, btns);
+  box.append(bar, el('pre', null, f.text));
+}
+window.addEventListener('hashchange', show);
+api('list').then(l => { list = l; show(); }).catch(() => show());
+</script>
+</body>
+</html>
