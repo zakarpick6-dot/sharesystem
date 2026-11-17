@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard · Revomaker System Share</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<video id="bg" src="bg.mp4" autoplay muted loop playsinline></video>
+<div class="shade"></div>
+
+<!-- LOGIN -->
+<div id="loginView" class="login box hide">
+  <h1>Owner login</h1>
+  <form id="loginForm">
+    <label for="u">Username</label><input type="text" id="u" autocomplete="username" required>
+    <label for="p">Password</label><input type="password" id="p" autocomplete="current-password" required>
+    <button class="btn main" type="submit">Log in</button>
+  </form>
+  <div class="msg" id="loginMsg"></div>
+  <div class="foot"><a href="index.html">← Back to site</a></div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashView" class="wrap hide">
+  <div class="top">
+    <h1>Dashboard</h1>
+    <div class="btns"><a class="btn" href="index.html">View site</a><button class="btn" id="newBtn">New text</button><button class="btn del" id="logout">Log out</button></div>
+  </div>
+  <p class="sub">Upload files, then share each one with a private link. The person with the link sees only that file.</p>
+  <div class="drop box" id="drop"><b>Drop .txt files here or tap to choose</b><br><small>Max about 700 KB per file</small></div>
+  <input type="file" id="file" accept=".txt,text/plain" multiple hidden>
+  <div class="msg" id="msg"></div>
+  <div class="box" id="list"></div>
+</div>
+
+<dialog id="dlg">
+  <form id="editForm">
+    <h2 id="dlgTitle">Edit file</h2>
+    <label for="en">File name</label><input type="text" id="en" maxlength="120" required>
+    <label for="et">Text</label><textarea id="et"></textarea>
+    <div class="btns"><button class="btn main" type="submit">Save</button><button class="btn" type="button" id="cancel">Cancel</button></div>
+  </form>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+function el(t, c, x) { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; }
+async function api(d, body, id) {
+  const opt = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {};
+  const r = await fetch('/api?do=' + d + (id ? '&id=' + id : ''), opt);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error || 'Error'), { status: r.status });
+  return j;
+}
+function say(t, kind) { $('msg').textContent = t; $('msg').className = 'msg ' + (kind || ''); }
+function oops(e) { if (e.status === 401) start(); else say(e.message, 'err'); }
+
+async function start() {
+  const me = await api('me').catch(() => ({ owner: false }));
+  $('loginView').classList.toggle('hide', me.owner);
+  $('dashView').classList.toggle('hide', !me.owner);
+  if (me.owner) load();
+}
+
+$('loginForm').onsubmit = async e => {
+  e.preventDefault();
+  $('loginMsg').className = 'msg'; $('loginMsg').textContent = 'Checking…';
+  try { await api('login', { username: $('u').value, password: $('p').value }); $('p').value = ''; $('loginMsg').textContent = ''; start(); }
+  catch (err) { $('loginMsg').className = 'msg err'; $('loginMsg').textContent = err.message; $('p').value = ''; }
+};
+$('logout').onclick = async () => { await api('logout', {}).catch(() => {}); start(); };
+
+async function load() {
+  let files;
+  try { files = await api('list'); } catch (e) { return oops(e); }
+  const box = $('list'); box.innerHTML = '';
+  if (!files.length) { box.appendChild(el('div', 'empty', 'No files yet. Upload one above or press “New text”.')); return; }
+  const link = t => location.origin + '/#' + t;
+  files.forEach(f => {
+    const row = el('div', 'row'), nm = el('div', 'nm'), b = el('b', null, f.name);
+    b.appendChild(el('span', 'tag' + (f.shared ? ' pub' : ''), f.shared ? 'shared' : 'private'));
+    nm.append(b, el('small', null, f.size.toLocaleString() + ' chars · updated ' + f.updated));
+    const btns = el('div', 'btns');
+    const sh = el('button', 'btn main', f.shared ? 'Copy link' : 'Share');
+    sh.onclick = async () => {
+      try {
+        const t = f.share || (await api('share', { id: f.id })).share;
+        await navigator.clipboard.writeText(link(t));
+        say('Link copied. Send it to the person. They will see only “' + f.name + '”.', 'ok');
+        load();
+      } catch (e) { oops(e); }
+    };
+    btns.append(sh);
+    if (f.shared) {
+      const view = el('a', 'btn', 'Open'); view.href = link(f.share); view.target = '_blank'; view.rel = 'noopener';
+      const stop = el('button', 'btn', 'Stop sharing');
+      stop.onclick = () => { if (confirm('The old link will stop working. Stop sharing “' + f.name + '”?')) api('unshare', { id: f.id }).then(() => { say('Sharing stopped.', 'ok'); load(); }).catch(oops); };
+      btns.append(view, stop);
+    }
+    const ed = el('button', 'btn', 'Edit'); ed.onclick = () => openEditor(f.id);
+    const del = el('button', 'btn del', 'Delete');
+    del.onclick = () => { if (confirm('Delete “' + f.name + '” for good?')) api('remove', { id: f.id }).then(() => { say('Deleted.', 'ok'); load(); }).catch(oops); };
+    btns.append(ed, del); row.append(nm, btns); box.appendChild(row);
+  });
+}
+
+async function upload(files) {
+  let n = 0;
+  for (const f of files) {
+    if (f.size > 700000) { say('“' + f.name + '” is too big (max about 700 KB).', 'err'); continue; }
+    try { await api('add', { name: f.name, text: await f.text() }); n++; } catch (e) { return oops(e); }
+  }
+  if (n) say(n + ' file' + (n > 1 ? 's' : '') + ' uploaded.', 'ok');
+  load();
+}
+const drop = $('drop'), input = $('file');
+drop.onclick = () => input.click();
+input.onchange = () => { if (input.files.length) upload([...input.files]); input.value = ''; };
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); upload([...e.dataTransfer.files]); };
+
+let editing = null;
+async function openEditor(id) {
+  editing = id; $('en').value = ''; $('et').value = '';
+  $('dlgTitle').textContent = id ? 'Edit file' : 'New text';
+  if (id) { try { const f = await api('get', null, id); $('en').value = f.name; $('et').value = f.text; } catch (e) { return oops(e); } }
+  $('dlg').showModal();
+}
+$('newBtn').onclick = () => openEditor(null);
+$('cancel').onclick = () => $('dlg').close();
+$('editForm').onsubmit = async e => {
+  e.preventDefault();
+  const b = { name: $('en').value, text: $('et').value };
+  try { await (editing ? api('edit', Object.assign({ id: editing }, b)) : api('add', b)); $('dlg').close(); say('Saved.', 'ok'); load(); } catch (err) { oops(err); }
+};
+start();
+</script>
+</body>
+</html>
